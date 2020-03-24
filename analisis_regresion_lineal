@@ -1,0 +1,104 @@
+import matplotlib.pyplot as plt
+import pandas as pd
+import pylab as pl
+import numpy as np
+!pip install ibm-cos-sdk
+import ibm_boto3
+%matplotlib inline
+
+#### Leer csv files directo de IBM Cloud
+credentials={
+  "apikey": "60Xa-6isx1BmyvdelnnoyLd2Mcx75kNcHIDOiHgG9UHY",
+  "cos_hmac_keys": {
+    "access_key_id": "4cc7ed11cdc347cc9c2ae7d03188cd92",
+    "secret_access_key": "ae655906191aa4f3535cdb47e16fe4f0865874ad770890a4"
+  },
+  "endpoints": "https://control.cloud-object-storage.cloud.ibm.com/v2/endpoints",
+  "iam_apikey_description": "Auto-generated for key 4cc7ed11-cdc3-47cc-9c2a-e7d03188cd92",
+  "iam_apikey_name": "Credenciales de servicio-1",
+  "iam_role_crn": "crn:v1:bluemix:public:iam::::serviceRole:Manager",
+  "iam_serviceid_crn": "crn:v1:bluemix:public:iam-identity::a/74775ccc8fcc4321a408ee5175ea2156::serviceid:ServiceId-e858e44f-6c44-4b5b-9d82-adee510aecf1",
+  "resource_instance_id": "crn:v1:bluemix:public:cloud-object-storage:global:a/74775ccc8fcc4321a408ee5175ea2156:9666b396-b82f-43bf-8c4a-d8748749f8ca::"
+}
+from ibm_botocore.client import Config
+auth_endpoint = 'https://iam.bluemix.net/oidc/token'
+service_endpoint = 'https://s3.us-south.cloud-object-storage.appdomain.cloud'
+
+resource = ibm_boto3.resource('s3',
+                      ibm_api_key_id=credentials['apikey'],
+                      ibm_service_instance_id=credentials['resource_instance_id'],
+                      ibm_auth_endpoint=auth_endpoint,
+                      config=Config(signature_version='oauth'),
+                      endpoint_url=service_endpoint)
+                   
+# Lectura de los datos
+import pandas as pd
+import io
+
+obj = resource.Object(bucket_name="cloudatabase", key="FuelConsumptionCo2.csv").get()
+obj_bytes = obj['Body'].read() # .read() returns a byte string
+obj_bytes_stream = io.BytesIO(obj_bytes) # that we convert to a stream
+pd.read_csv(obj_bytes_stream) # and eventually a pandas dataframe
+
+# or a bit more succinctly:
+obj = resource.Object(bucket_name="cloudatabase", key="FuelConsumptionCo2.csv").get()
+df=pd.read_csv(io.BytesIO(obj['Body'].read()))
+df.head(0)
+
+# Sumarizar los datos(Conteo, media, dev std, max, min, percentiles)
+df.describe()
+
+# Seleccionar algunas columnas
+cdf = df[['ENGINESIZE','CYLINDERS','FUELCONSUMPTION_COMB','CO2EMISSIONS']]
+cdf.head(4)
+
+# Diagrama de barra de las columnas seleccionadas
+# podemos asignar nueva variable o seguir usando variable cdf
+#viz = cdf[['CYLINDERS','ENGINESIZE','CO2EMISSIONS','FUELCONSUMPTION_COMB']]
+cdf.hist()
+plt.show()
+
+# Nube de puntos - Analisis de correlación
+plt.scatter(cdf.FUELCONSUMPTION_COMB, cdf.CO2EMISSIONS,  color='blue')
+plt.xlabel("FUELCONSUMPTION_COMB")
+plt.ylabel("Emission")
+plt.show()
+
+# Entrenar distribución de datos
+msk = np.random.rand(len(df)) < 0.8
+train = cdf[msk]
+test = cdf[~msk]
+
+plt.scatter(train.FUELCONSUMPTION_COMB, train.CO2EMISSIONS,  color='blue')
+plt.xlabel("Engine size")
+plt.ylabel("Emission")
+plt.show()
+
+#Entrenar Modelo de regresión lineal simple
+#Entrenar al modelo significa crear el modelo
+from sklearn import linear_model
+regr = linear_model.LinearRegression()
+train_x = np.asanyarray(train[['FUELCONSUMPTION_COMB']])
+train_y = np.asanyarray(train[['CO2EMISSIONS']])
+regr.fit (train_x, train_y)
+# The coefficients
+print ('Coefficients: ', regr.coef_)
+print ('Intercept: ',regr.intercept_)
+
+#Mostrar la recta de regresión lineal
+plt.scatter(train.FUELCONSUMPTION_COMB, train.CO2EMISSIONS,  color='blue')
+plt.plot(train_x, regr.coef_[0][0]*train_x + regr.intercept_[0], '-r')
+plt.xlabel("Fuel consumption")
+plt.ylabel("Emission")
+
+#Coeficiente de determinación y precisión del modelo
+#R2= Porcentaje de cuan cerca estan los puntos de la linea de regresión ajustada
+from sklearn.metrics import r2_score
+
+test_x = np.asanyarray(test[['FUELCONSUMPTION_COMB']])
+test_y = np.asanyarray(test[['CO2EMISSIONS']])
+test_y_ = regr.predict(test_x)
+
+print("Error medio absoluto: %.2f" % np.mean(np.absolute(test_y_ - test_y)))
+print("Suma residual de los cuadrados (MSE): %.2f" % np.mean((test_y_ - test_y) ** 2))
+print("R2-score: %.2f" % r2_score(test_y_ , test_y) )
